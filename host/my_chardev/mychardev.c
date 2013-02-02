@@ -5,6 +5,7 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
+#include <linux/device.h>
 
 
 #define MYCHAR_MAJOR 0
@@ -29,30 +30,36 @@ struct mychar_dev *mychar_devices; /* allocated in driver _init function*/
 
 static ssize_t mychar_fops_read(struct file * file, char __user * user, size_t size, loff_t * count)
 {
+	printk(KERN_INFO "mychar_fops_read");
 	return 0;
 }
 
 static ssize_t mychar_fops_write (struct file * file, const char __user * user, size_t size, loff_t *count)
 {
+	printk(KERN_INFO "mychar_fops_write");
 	return 0;
 }
 
 static long mychar_fops_unlocked_ioctl (struct file * file, unsigned int cmd_in, unsigned long arg)
 {
+	printk(KERN_INFO "mychar_fops_unlocked_ioctl");
 	return 0;
 }
 
 static int mychar_fops_mmap (struct file * file, struct vm_area_struct * area)
 {
+	printk(KERN_INFO "mychar_fops_mmap");
 	return 0;
 }
 static int mychar_fops_open (struct inode * inode, struct file * file)
 {
+	printk(KERN_INFO "mychar_fops_open");
 	return 0;
 }
 
 static int mychar_fops_flush (struct file * file, fl_owner_t id)
 {
+	printk(KERN_INFO "mychar_fops_flush");
 	return 0;
 }
 
@@ -63,7 +70,6 @@ struct file_operations mychar_fops = {
 	.unlocked_ioctl = mychar_fops_unlocked_ioctl,
 	.open = mychar_fops_open,
 	.mmap = mychar_fops_mmap,
-	.open = mychar_fops_open,
 	.flush = mychar_fops_flush,
 };
 
@@ -76,13 +82,12 @@ static void mychardev_setup_cdev(struct mychar_dev *dev, int index)
 	dev->cdev.owner = THIS_MODULE;
 	dev->cdev.ops = &mychar_fops;
 
-	devno = MKDEV(255, 25);
+	devno = MKDEV(mychardev_major, index);
 	err = cdev_add(&dev->cdev, devno, 1);
 	if(err)
-		printk(KERN_INFO "Error: adding mychardev module");
+		printk(KERN_INFO "Error: adding mychardev module maj:%d min:%d", MAJOR(devno), MINOR(devno));
 	else
-		printk(KERN_INFO "Success: adding mychardev module");
-
+		printk(KERN_INFO "Success: adding mychardev module maj:%d min:%d", MAJOR(devno), MINOR(devno));
 }
 /* init and exit functions */
 static int __init mychardev_init(void)
