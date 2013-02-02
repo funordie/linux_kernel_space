@@ -6,11 +6,18 @@
 #include <linux/fs.h>
 #include <linux/slab.h>
 #include <linux/device.h>
-
+#include <linux/types.h>
+#include <asm/uaccess.h>
 
 #define MYCHAR_MAJOR 0
 
 int mychardev_major = MYCHAR_MAJOR;
+
+// debugging macros so we can pin down message origin at a glance
+#define FLE strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__
+#define DEBUGPRINT(LEVEL, _fmt, ...)  printk(LEVEL "[file:%s, line:%d]: " _fmt"\n", FLE, __LINE__ , ##__VA_ARGS__)
+//__VA_ARGS__
+//#define print(LEVEL, MSG, ARG) printk(LEVEL "[FILE:%s LINE:%d]:"MSG), __FILE__, __LINE__, ARG);
 
 /* driver parameters */
 static char *whom = "world";
@@ -24,42 +31,82 @@ MODULE_LICENSE("Dual BSD/GPL");
 /* mychardev structure structure */
 struct mychar_dev {
 	struct cdev cdev;
+	bool bReadData;
 };
 
 struct mychar_dev *mychar_devices; /* allocated in driver _init function*/
 
-static ssize_t mychar_fops_read(struct file * file, char __user * user, size_t size, loff_t * count)
+static ssize_t mychar_fops_read(struct file * filp, char __user * buf, size_t count, loff_t * f_pos)
 {
-	printk(KERN_INFO "mychar_fops_read");
+	static char dummy_data[] = "read_data_string\n";
+	ssize_t retval = 0;
+	struct mychar_dev *dev = filp->private_data; /* the first listitem */
+
+	DEBUGPRINT(KERN_INFO,"mychar_fops_read start");
+
+	if(dev->bReadData) {
+		dev->bReadData = false;
+	}
+	else {
+		DEBUGPRINT(KERN_INFO,"mychar_fops_read return 0");
+		return 0;
+	}
+	if (*f_pos > sizeof(dummy_data)) {
+		DEBUGPRINT(KERN_INFO,"mychar_fops_read return -1");
+		return -1;
+	}
+	if (copy_to_user(buf,dummy_data, sizeof(dummy_data))) {
+		retval = -EFAULT;
+		goto nothing;
+	}
+
+	*f_pos += count;
+
+	if(count > sizeof(dummy_data)) {
+		DEBUGPRINT(KERN_INFO,"mychar_fops_read return sizeof(dummy_data):%d", sizeof(dummy_data));
+		return sizeof(dummy_data);
+	}
+
+	DEBUGPRINT(KERN_INFO,"mychar_fops_read return count:%d",count);
+	return count;
+
+	nothing:
+	DEBUGPRINT(KERN_INFO,"mychar_fops_read return retval:%d",retval);
+	return retval;
 	return 0;
 }
 
-static ssize_t mychar_fops_write (struct file * file, const char __user * user, size_t size, loff_t *count)
+static ssize_t mychar_fops_write (struct file * filp, const char __user * user, size_t size, loff_t * f_pos)
 {
 	printk(KERN_INFO "mychar_fops_write");
 	return 0;
 }
 
-static long mychar_fops_unlocked_ioctl (struct file * file, unsigned int cmd_in, unsigned long arg)
+static long mychar_fops_unlocked_ioctl (struct file * filp, unsigned int cmd_in, unsigned long arg)
 {
 	printk(KERN_INFO "mychar_fops_unlocked_ioctl");
 	return 0;
 }
 
-static int mychar_fops_mmap (struct file * file, struct vm_area_struct * area)
+static int mychar_fops_mmap (struct file * filp, struct vm_area_struct * area)
 {
 	printk(KERN_INFO "mychar_fops_mmap");
 	return 0;
 }
-static int mychar_fops_open (struct inode * inode, struct file * file)
+static int mychar_fops_open (struct inode * inode, struct file * filp)
 {
-	printk(KERN_INFO "mychar_fops_open");
-	return 0;
-}
+	struct mychar_dev *dev; /* device information */
 
-static int mychar_fops_flush (struct file * file, fl_owner_t id)
-{
-	printk(KERN_INFO "mychar_fops_flush");
+	printk(KERN_INFO "mychar_fops_open");
+
+	/*  Find the device */
+	dev = container_of(inode->i_cdev, struct mychar_dev, cdev);
+
+	//mark data to be read
+	dev->bReadData = true;
+
+	/* and use filp->private_data to point to the device data */
+	filp->private_data = dev;
 	return 0;
 }
 
@@ -70,7 +117,6 @@ struct file_operations mychar_fops = {
 	.unlocked_ioctl = mychar_fops_unlocked_ioctl,
 	.open = mychar_fops_open,
 	.mmap = mychar_fops_mmap,
-	.flush = mychar_fops_flush,
 };
 
 static void mychardev_setup_cdev(struct mychar_dev *dev, int index)
