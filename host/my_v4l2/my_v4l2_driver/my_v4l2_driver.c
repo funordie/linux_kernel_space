@@ -40,6 +40,7 @@ struct myv4l_dev {
 	struct v4l2_capability cap;
 	struct v4l2_format fmt;
 	struct v4l2_requestbuffers req;
+	struct v4l2_streamparm streamparm;
 
 	bool bReadData;	/*tempory variamle used for dummy_data when read file operations*/
 };
@@ -97,6 +98,8 @@ static long myv4l_fops_unlocked_ioctl (struct file * filp, unsigned int cmd_in, 
 	struct v4l2_capability *cap;
 	struct v4l2_format *fmt;
 	struct v4l2_requestbuffers *req;
+	struct v4l2_streamparm *streamparm;
+	struct v4l2_buffer *buf;
 
 	struct myv4l_dev *dev = filp->private_data; /* the first listitem */
 
@@ -111,6 +114,7 @@ static long myv4l_fops_unlocked_ioctl (struct file * filp, unsigned int cmd_in, 
 
 	case VIDIOC_S_FMT :
 		fmt = (struct v4l2_format*)arg;
+		/*TODO: check for supported parameter*/
 		memcpy(&dev->fmt, fmt, sizeof(struct v4l2_format));
 		DEBUGPRINT(KERN_INFO,"myv4l_fops_unlocked_ioctl VIDIOC_S_FMT");
 		break;
@@ -122,13 +126,21 @@ static long myv4l_fops_unlocked_ioctl (struct file * filp, unsigned int cmd_in, 
 		break;
 
 	case VIDIOC_S_PARM :
-
+		streamparm = (struct v4l2_streamparm*)arg;
+		/*TODO: check for supported parameter*/
+		memcpy(&dev->streamparm, streamparm, sizeof(struct v4l2_streamparm));
+		DEBUGPRINT(KERN_INFO,"myv4l_fops_unlocked_ioctl VIDIOC_G_FMT");
 		break;
 
 	case VIDIOC_REQBUFS :
 		req = (struct v4l2_requestbuffers*)arg;
 		DEBUGPRINT(KERN_INFO,"myv4l_fops_unlocked_ioctl VIDIOC_REQBUFS");
 		//req->
+		break;
+
+	case VIDIOC_QUERYBUF :
+		buf = (struct v4l2_buffer*)arg;
+
 		break;
 	}
 	return 0;
