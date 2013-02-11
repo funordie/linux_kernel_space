@@ -1,0 +1,2 @@
+//a13 device test commands
+busybox mknod /dev/a13_dev c 255 255
