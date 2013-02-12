@@ -16,6 +16,8 @@ static dev_t a13_gpio_dev_t = MKDEV(255, 255);
 
 struct cdev a13_cdev;
 unsigned int *pc;
+static struct class *class_a13_gpio;
+static struct device *dev_a13_gpio;
 
 static	ssize_t a13_gpio_open (struct inode *inode, struct file *file)
 {
@@ -63,6 +65,7 @@ static const struct file_operations a13_gpio_fops = {
 
 static int __init a13_gpio_init(void) {
 
+	void *ptr_err;
 	pr_err("a13_gpio_init start\n");
 
 	if (register_chrdev_region(a13_gpio_dev_t, 1, "a13_gpio_device")) {
@@ -74,7 +77,7 @@ static int __init a13_gpio_init(void) {
 
 	if (cdev_add(&a13_cdev, a13_gpio_dev_t, 1)) {
 		pr_err("a13_gpio: Failed to add device number\n");
-		goto unregister;
+		goto error1;
 	}
 
 	//mmap MMIO region
@@ -88,7 +91,7 @@ static int __init a13_gpio_init(void) {
 	pc = (u32*)ioremap( A13_GPIO_BASE_ADDRESS, A13_GPIO_ADDRESS_SIZE);
 	if(pc == NULL) {
 		pr_err("Unable to remap gpio memory");
-		goto unreq_region;
+		goto error2;
 	}
 	pr_err("a13_gpio G9 config remap address:%#x\n", (unsigned int)pc);
 	//init G9 as output
@@ -96,14 +99,24 @@ static int __init a13_gpio_init(void) {
 
 	//print config value
 	pr_err("a13_gpio G9 config value:%#x address:%#x\n", *(pc+(0xdc>>2)), ((unsigned int)pc+(0xdc>>2)));
-
 	pr_err("a13_gpio_init success\n");
+
+	//create device
+	class_a13_gpio = class_create(THIS_MODULE, "a13_gpio");
+	if (IS_ERR(ptr_err = class_a13_gpio))
+		goto error2;
+
+	dev_a13_gpio = device_create(class_a13_gpio, NULL, a13_gpio_dev_t, NULL, "a13_gpio");
+	if (IS_ERR(ptr_err = dev_a13_gpio))
+		goto error3;
 
 	return 0;
 
-	unreq_region:
+	error3:
+		class_destroy(class_a13_gpio);
+	error2:
 		release_mem_region(A13_GPIO_BASE_ADDRESS, A13_GPIO_ADDRESS_SIZE);
-	unregister:
+	error1:
 		unregister_chrdev_region(a13_gpio_dev_t, 1);
 	return -1;
 }
@@ -117,6 +130,9 @@ static void __exit a13_gpio_exit(void) {
 	release_mem_region(A13_GPIO_BASE_ADDRESS, A13_GPIO_ADDRESS_SIZE);
 	iounmap(pc);
 
+	//remove device
+	device_destroy(class_a13_gpio, a13_gpio_dev_t);
+	class_destroy(class_a13_gpio);
 	return;
 }
 
