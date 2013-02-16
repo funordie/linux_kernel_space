@@ -9,8 +9,16 @@
 #include <asm/io.h>			//ioremap
 #include "a13_gpio.h"
 
+#include <asm-generic/uaccess.h> //copy_to_user; copy_from_user
+
 #define A13_GPIO_BASE_ADDRESS 0x01C20800
 #define A13_GPIO_ADDRESS_SIZE 1024
+
+#define __FILE_NAME__ strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__
+
+#define PRINT(_fmt, ...)  \
+	printk("[file:%s, line:%d]: " _fmt"\n", __FILE_NAME__, __LINE__ , ##__VA_ARGS__)
+
 
 struct a13_dev_struct {
 	struct cdev a13_cdev_value;
@@ -32,11 +40,63 @@ static struct device *dev_a13_gpio_value;
 
 struct sunxi_gpio_reg *sunxi_gpio;
 
+static unsigned long ulReadCount = 0;
+
 /*////////////////////////////////////////////  file_operations - value ////////////////////////////////////////////*/
 static	ssize_t a13_gpio_value_open (struct inode *inode, struct file *file)
 {
 	pr_err("a13_gpio_value_open\n");
+	ulReadCount = 0;
 	return 0;
+}
+static loff_t a13_gpio_value_llseek(struct file *file, loff_t offset, int whence)
+{
+    loff_t newpos;
+
+    switch(whence) {
+      case 0: /* SEEK_SET */
+        newpos = offset;
+        break;
+
+      case 1: /* SEEK_CUR */
+        newpos = file->f_pos + offset;
+        break;
+
+      case 2: /* SEEK_END */
+    	return -EINVAL;
+        break;
+
+      default: /* can't happen */
+        return -EINVAL;
+    }
+    if (newpos < 0) return -EINVAL;
+    file->f_pos = newpos;
+    return newpos;
+	return 0;
+}
+
+static ssize_t a13_gpio_value_read(struct file *file, char __user *buf, size_t size, loff_t *offset) {
+	unsigned long  port;
+	struct sunxi_gpio * gpio_bank_pointer;
+	char ch[10] = "test\n";
+
+	pr_err("a13_gpio_value_read size:%d offset:%lld file->f_pos:%d\n", size , *offset, file->f_pos);
+
+	if(ulReadCount != 0) return 0;
+
+	ulReadCount++;
+
+	//set port
+	port = *offset >> 2;
+
+	//get selected bank pointer
+	gpio_bank_pointer = &sunxi_gpio->gpio_bank[port];
+
+	copy_to_user(buf, &gpio_bank_pointer->dat, sizeof(gpio_bank_pointer->dat));
+
+	pr_err("a13_gpio_value_read result address:0x%p value:%#x size:%d\n", &gpio_bank_pointer->dat , gpio_bank_pointer->dat, sizeof(gpio_bank_pointer->dat));
+
+	return sizeof(gpio_bank_pointer->dat);
 }
 static	ssize_t a13_gpio_value_write (struct file *file, const char __user *buf, size_t size, loff_t *offset)
 {
@@ -103,6 +163,8 @@ static	int a13_gpio_value_release (struct inode *inode, struct file *file)
 static const struct file_operations a13_gpio_value_fops = {
 	.owner = THIS_MODULE,
 	.open		= a13_gpio_value_open,
+	.read 		= a13_gpio_value_read,
+	.llseek		= a13_gpio_value_llseek,
 	.write		= a13_gpio_value_write,
 	.release	= a13_gpio_value_release
 };
