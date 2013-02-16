@@ -12,37 +12,81 @@
 #define A13_GPIO_BASE_ADDRESS 0x01C20800
 #define A13_GPIO_ADDRESS_SIZE 1024
 
-static dev_t a13_gpio_dev_t = MKDEV(255, 255);
+struct a13_dev_struct {
+	struct cdev a13_cdev_value;
+	struct cdev a13_cdev_config;
+};
 
-struct cdev a13_cdev;
-unsigned int *pc;
-static struct class *class_a13_gpio;
-static struct device *dev_a13_gpio;
+struct a13_dev_struct a13_dev;
 
-static	ssize_t a13_gpio_open (struct inode *inode, struct file *file)
+//value device
+static dev_t a13_gpio_value_dev_t = MKDEV(255, 255);
+//config device
+static dev_t a13_gpio_config_dev_t = MKDEV(255, 254);
+
+static struct class *class_a13_gpio_config;
+static struct class *class_a13_gpio_value;
+
+static struct device *dev_a13_gpio_config;
+static struct device *dev_a13_gpio_value;
+
+struct sunxi_gpio_reg *sunxi_gpio;
+
+/*////////////////////////////////////////////  file_operations - value ////////////////////////////////////////////*/
+static	ssize_t a13_gpio_value_open (struct inode *inode, struct file *file)
 {
-	pr_err("a13_gpio_open\n");
+	pr_err("a13_gpio_value_open\n");
 	return 0;
 }
-static	ssize_t a13_gpio_write (struct file *file, const char __user *buf, size_t size, loff_t *offset)
+static	ssize_t a13_gpio_value_write (struct file *file, const char __user *buf, size_t size, loff_t *offset)
 {
-	static int pin = 9;
+	unsigned long pin, port;
+	struct sunxi_gpio * gpio_bank_pointer;
+	char ch[3];
 
-	pr_err("a13_gpio_write buf[0]:%d size:%d offset:%lld\n", buf[0], size , *offset);
+	pr_err("a13_gpio_value_write buf[0]:%d size:%d offset:%lld\n", buf[0], size , *offset);
 
-	//switch gpio value
-	if(size == 2) {
-		if(buf[0] == '0') {
-			//set pin off
-			*(pc+(0xe8>>2)) &= ~(1<<pin);//0x81f;
-			pr_err("a13_gpio_write set gpio OFF read value:%#x addr:%#x", *(pc+(0xe8>>2)), ((unsigned int)pc+(0xe8>>2)));
+	//set pin value
+	//input data format: A BB C
+	// A - port number [A - I]
+	// BB - pin number [00 - 31]
+	// C - value [0-off 1-on]
+	//example: G 09 1 - G9 pin command:ON
+
+	if(size == 7) {
+		switch(buf[0]) {
+		case 'G':
+			//selected port - G
+			port = 6;
+			break;
+		case 'F':
+			//selected port - F
+			port = 7;
+			break;
+		default :
+			return -1;
 		}
-		else if(buf[0] == '1'){
-			//set pin on
-			*(pc+(0xe8>>2)) |= (1<<pin);//0xa1f;
-			pr_err("a13_gpio_write set gpio ON read value:%#x addr:%#x", *(pc+(0xe8>>2)), ((unsigned int)pc+(0xe8>>2)));
-		}
 
+		gpio_bank_pointer = &sunxi_gpio->gpio_bank[port];
+
+		ch[0] = buf[2];
+		ch[1] = buf[3];
+		ch[2] = 0;
+		kstrtol(ch, 10, &pin);
+
+		pr_err("a13_gpio_value_write port:%lu pin:%lu\n", port, pin);
+
+		pr_err("a13_gpio_value_write before write address:%p value:%#018x\n", &gpio_bank_pointer->dat, gpio_bank_pointer->dat);
+
+		if(buf[5] == '1') {
+			//set ON
+			gpio_bank_pointer->dat |= (1 << pin);
+		}
+		else if(buf[5] == '0') {
+			//set OFF
+			gpio_bank_pointer->dat &= ~(1 << pin);
+		}
+		pr_err("a13_gpio_value_write after write address:%p value:%#018x\n", &gpio_bank_pointer->dat, gpio_bank_pointer->dat);
 		return size;
 	}
 
@@ -50,89 +94,207 @@ static	ssize_t a13_gpio_write (struct file *file, const char __user *buf, size_t
 
 }
 //int (*open) (struct inode *, struct file *);
-static	int a13_gpio_release (struct inode *inode, struct file *file)
+static	int a13_gpio_value_release (struct inode *inode, struct file *file)
 {
-	pr_err("a13_gpio_release\n");
+	pr_err("a13_gpio_value_release\n");
 	return 0;
 }
 
-static const struct file_operations a13_gpio_fops = {
+static const struct file_operations a13_gpio_value_fops = {
 	.owner = THIS_MODULE,
-	.open		= a13_gpio_open,
-	.write		= a13_gpio_write,
-	.release	= a13_gpio_release
+	.open		= a13_gpio_value_open,
+	.write		= a13_gpio_value_write,
+	.release	= a13_gpio_value_release
 };
 
-static int __init a13_gpio_init(void) {
+/*////////////////////////////////////////////  file_operations - config ////////////////////////////////////////////*/
+static	ssize_t a13_gpio_config_open (struct inode *inode, struct file *file)
+{
+	pr_err("a13_gpio_config_open\n");
+	return 0;
+}
+static	ssize_t a13_gpio_config_write (struct file *file, const char __user *buf, size_t size, loff_t *offset)
+{
+	unsigned long pin, port;
+	struct sunxi_gpio * gpio_bank_pointer;
+	char ch[3];
+
+	pr_err("a13_gpio_config_write buf[0]:%d size:%d offset:%lld\n", buf[0], size , *offset);
+
+	//set pin configurations
+	//input data format: A BB C
+	// A - port number [A - I]
+	// BB - pin number [00 - 31]
+	// C - direction [0-input 1-output]
+	//example: G 09 0 - G9 direction output
+
+	if(size == 7) {
+		switch(buf[0]) {
+		case 'G':
+			//selected port - G
+			port = 6;
+			break;
+		case 'F':
+			//selected port - F
+			port = 7;
+			break;
+		default :
+			return -1;
+		}
+
+		gpio_bank_pointer = &sunxi_gpio->gpio_bank[port];
+
+		ch[0] = buf[2];
+		ch[1] = buf[3];
+		ch[2] = 0;
+		kstrtol(ch, 10, &pin);
+
+		pr_err("a13_gpio_config_write port:%lu pin:%lu\n", port, pin);
+
+		pr_err("a13_gpio_config_write before write address:%p value:%#018x\n", &gpio_bank_pointer->cfg[pin >> 3], gpio_bank_pointer->cfg[pin >> 3]);
+
+		if(buf[5] == '1') {
+			//set direction output
+			gpio_bank_pointer->cfg[pin >> 3] |= (1 << ((pin-((pin>>3)*8))*4));
+		}
+		else if(buf[5] == '0') {
+			//set direction input
+			gpio_bank_pointer->cfg[pin >> 3] &= ~(1 << ((pin-((pin>>3)*8))*4));
+		}
+		pr_err("a13_gpio_config_write after write address:%p value:%#018x\n", &gpio_bank_pointer->cfg[pin >> 3], gpio_bank_pointer->cfg[pin >> 3]);
+		return size;
+	}
+
+	return -1;
+
+}
+//int (*open) (struct inode *, struct file *);
+static	int a13_gpio_config_release (struct inode *inode, struct file *file)
+{
+	pr_err("a13_gpio_config_release\n");
+	return 0;
+}
+
+static const struct file_operations a13_gpio_config_fops = {
+	.owner = THIS_MODULE,
+	.open		= a13_gpio_config_open,
+	.write		= a13_gpio_config_write,
+	.release	= a13_gpio_config_release
+};
+
+static void deregister_and_delete_devices (void) {
+
+	//delete devices
+	device_destroy(class_a13_gpio_value, a13_gpio_value_dev_t);
+	class_destroy(class_a13_gpio_value);
+	device_destroy(class_a13_gpio_config, a13_gpio_config_dev_t);
+	class_destroy(class_a13_gpio_config);
+
+	//deregister devices
+	cdev_del(&a13_dev.a13_cdev_value);
+	unregister_chrdev_region(a13_gpio_value_dev_t, 1);
+	cdev_del(&a13_dev.a13_cdev_config);
+	unregister_chrdev_region(a13_gpio_config_dev_t, 1);
+}
+
+static void register_and_create_devices (void) {
 
 	void *ptr_err;
-	pr_err("a13_gpio_init start\n");
 
-	if (register_chrdev_region(a13_gpio_dev_t, 1, "a13_gpio_device")) {
-		pr_err("a13_gpio:Failed to allocate device number\n");
-		return -1;
+	//register config device
+	if (register_chrdev_region(a13_gpio_config_dev_t, 1, "a13_gpio_config_device")) {
+		pr_err("a13_gpio:Failed to allocate config device number\n");
+		return;
 	}
-
-	cdev_init(&a13_cdev, &a13_gpio_fops);
-
-	if (cdev_add(&a13_cdev, a13_gpio_dev_t, 1)) {
-		pr_err("a13_gpio: Failed to add device number\n");
+	cdev_init(&a13_dev.a13_cdev_config, &a13_gpio_config_fops);
+	if (cdev_add(&a13_dev.a13_cdev_config, a13_gpio_config_dev_t, 1)) {
+		pr_err("a13_gpio: Failed to add config device number\n");
 		goto error1;
 	}
+
+	//register value device
+	if (register_chrdev_region(a13_gpio_value_dev_t, 1, "a13_gpio_value_device")) {
+		pr_err("a13_gpio:Failed to allocate value device number\n");
+		goto error2;
+	}
+	cdev_init(&a13_dev.a13_cdev_value, &a13_gpio_value_fops);
+	if (cdev_add(&a13_dev.a13_cdev_value, a13_gpio_value_dev_t, 1)) {
+		pr_err("a13_gpio: Failed to add value device number\n");
+		goto error3;
+	}
+
+	//create config device
+	class_a13_gpio_config = class_create(THIS_MODULE, "a13_gpio_config");
+	if (IS_ERR(ptr_err = class_a13_gpio_config))
+		goto error4;
+	dev_a13_gpio_config = device_create(class_a13_gpio_config, NULL, a13_gpio_config_dev_t, NULL, "a13_gpio_config");
+	if (IS_ERR(ptr_err = dev_a13_gpio_config))
+		goto error5;
+
+	//create value device
+	class_a13_gpio_value = class_create(THIS_MODULE, "a13_gpio_value");
+	if (IS_ERR(ptr_err = class_a13_gpio_value))
+		goto error6;
+	dev_a13_gpio_value = device_create(class_a13_gpio_value, NULL, a13_gpio_value_dev_t, NULL, "a13_gpio_value");
+	if (IS_ERR(ptr_err = dev_a13_gpio_value))
+		goto error7;
+
+	return;
+
+	error7:
+		class_destroy(class_a13_gpio_value);
+	error6:
+		device_destroy(class_a13_gpio_value, a13_gpio_value_dev_t);
+	error5:
+		class_destroy(class_a13_gpio_config);
+	error4:
+		cdev_del(&a13_dev.a13_cdev_value);
+	error3:
+		unregister_chrdev_region(a13_gpio_value_dev_t, 1);
+	error2:
+		cdev_del(&a13_dev.a13_cdev_config);
+	error1:
+		unregister_chrdev_region(a13_gpio_config_dev_t, 1);
+}
+static int __init a13_gpio_init(void) {
+
+	pr_err("a13_gpio_init start\n");
+
+	register_and_create_devices();
 
 	//mmap MMIO region
 	if( request_mem_region(A13_GPIO_BASE_ADDRESS, A13_GPIO_ADDRESS_SIZE, "a13_gpio_memory") == NULL )
 	{
-		pr_err("a13_gpio error: unable to obtain I/O memory address:%x\n",A13_GPIO_BASE_ADDRESS);
+		pr_err("a13_gpio error: unable to obtain I/O memory address:%#x\n",A13_GPIO_BASE_ADDRESS);
 	}
 	else {
 		pr_err("a13_gpio I/O memory address:%#x obtain success\n", A13_GPIO_BASE_ADDRESS);
 	}
-	pc = (u32*)ioremap( A13_GPIO_BASE_ADDRESS, A13_GPIO_ADDRESS_SIZE);
-	if(pc == NULL) {
+	sunxi_gpio = (struct sunxi_gpio_reg*)ioremap( A13_GPIO_BASE_ADDRESS, A13_GPIO_ADDRESS_SIZE);
+	if((unsigned long*)sunxi_gpio == NULL) {
 		pr_err("Unable to remap gpio memory");
-		goto error2;
+		goto error;
 	}
-	pr_err("a13_gpio G9 config remap address:%#x\n", (unsigned int)pc);
-	//init G9 as output
-	*(pc+(0xdc>>2)) = 0x1110;
-
-	//print config value
-	pr_err("a13_gpio G9 config value:%#x address:%#x\n", *(pc+(0xdc>>2)), ((unsigned int)pc+(0xdc>>2)));
-	pr_err("a13_gpio_init success\n");
-
-	//create device
-	class_a13_gpio = class_create(THIS_MODULE, "a13_gpio");
-	if (IS_ERR(ptr_err = class_a13_gpio))
-		goto error2;
-
-	dev_a13_gpio = device_create(class_a13_gpio, NULL, a13_gpio_dev_t, NULL, "a13_gpio");
-	if (IS_ERR(ptr_err = dev_a13_gpio))
-		goto error3;
+	else {
+		pr_err("a13_gpio I/O memory remap address:0x%p\n", sunxi_gpio);
+	}
 
 	return 0;
 
-	error3:
-		class_destroy(class_a13_gpio);
-	error2:
+	error:
 		release_mem_region(A13_GPIO_BASE_ADDRESS, A13_GPIO_ADDRESS_SIZE);
-	error1:
-		unregister_chrdev_region(a13_gpio_dev_t, 1);
+
 	return -1;
 }
 
 static void __exit a13_gpio_exit(void) {
 	pr_err("a13_gpio_exit\n");
 
-	cdev_del(&a13_cdev);
-	unregister_chrdev_region(a13_gpio_dev_t, 1);
+	deregister_and_delete_devices ();
 
 	release_mem_region(A13_GPIO_BASE_ADDRESS, A13_GPIO_ADDRESS_SIZE);
-	iounmap(pc);
+	iounmap((unsigned long *)sunxi_gpio);
 
-	//remove device
-	device_destroy(class_a13_gpio, a13_gpio_dev_t);
-	class_destroy(class_a13_gpio);
 	return;
 }
 
