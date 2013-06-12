@@ -128,6 +128,14 @@ static	ssize_t a13_gpio_value_write (struct file *file, const char __user *buf, 
 
 	if(size == 7 || size == 6) {
 		switch(read_buffer[0]) {
+		case 'B':
+			//selected port - B
+			port = 1;
+			break;
+		case 'E':
+			//selected port - E
+			port = 4;
+			break;
 		case 'G':
 			//selected port - G
 			port = 6;
@@ -211,6 +219,14 @@ static	ssize_t a13_gpio_config_write (struct file *file, const char __user *buf,
 
 	if(size == 7) {
 		switch(buf[0]) {
+		case 'B':
+			//selected port - B
+			port = 1;
+			break;
+		case 'E':
+			//selected port - E
+			port = 4;
+			break;
 		case 'G':
 			//selected port - G
 			port = 6;
