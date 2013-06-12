@@ -11,6 +11,8 @@
 
 #include <asm-generic/uaccess.h> //copy_to_user; copy_from_user
 
+#include <linux/vmalloc.h>
+
 #define A13_GPIO_BASE_ADDRESS 0x01C20800
 #define A13_GPIO_ADDRESS_SIZE 1024
 
@@ -104,7 +106,18 @@ static	ssize_t a13_gpio_value_write (struct file *file, const char __user *buf, 
 	struct sunxi_gpio * gpio_bank_pointer;
 	char ch[3];
 
-	pr_err("a13_gpio_value_write buf[0]:%d size:%d offset:%lld\n", buf[0], size , *offset);
+    char *read_buffer = vmalloc(size * sizeof(*read_buffer));
+    if (read_buffer == NULL)
+        return -ENOMEM;
+    if (copy_from_user(read_buffer, buf, size))
+    {
+        vfree(read_buffer);
+        return -EFAULT;
+    }
+    /* process buffer */
+
+
+	pr_err("a13_gpio_value_write buf[0]:%d size:%d offset:%lld\n", read_buffer[0], size , *offset);
 
 	//set pin value
 	//input data format: A BB C
@@ -113,8 +126,8 @@ static	ssize_t a13_gpio_value_write (struct file *file, const char __user *buf, 
 	// C - value [0-off 1-on]
 	//example: G 09 1 - G9 pin command:ON
 
-	if(size == 7) {
-		switch(buf[0]) {
+	if(size == 7 || size == 6) {
+		switch(read_buffer[0]) {
 		case 'G':
 			//selected port - G
 			port = 6;
@@ -129,27 +142,33 @@ static	ssize_t a13_gpio_value_write (struct file *file, const char __user *buf, 
 
 		gpio_bank_pointer = &sunxi_gpio->gpio_bank[port];
 
-		ch[0] = buf[2];
-		ch[1] = buf[3];
+		ch[0] = read_buffer[2];
+		ch[1] = read_buffer[3];
 		ch[2] = 0;
 		kstrtol(ch, 10, &pin);
 
-		pr_err("a13_gpio_value_write port:%lu pin:%lu\n", port, pin);
+		pr_err("a13_gpio_value_write string:%d, %d, %d,%d, %d, %d, %d, %d"
+				, read_buffer[0], read_buffer[1], read_buffer[2], read_buffer[3], read_buffer[4], read_buffer[5], read_buffer[6], read_buffer[7] , read_buffer[8]);
+
+		pr_err("a13_gpio_value_write port:%lu pin:%lu value:%c\n", port, pin, read_buffer[5]);
 
 		pr_err("a13_gpio_value_write before write address:%p value:%#018x\n", &gpio_bank_pointer->dat, gpio_bank_pointer->dat);
 
-		if(buf[5] == '1') {
+		if(read_buffer[5] == '1') {
 			//set ON
 			gpio_bank_pointer->dat |= (1 << pin);
 		}
-		else if(buf[5] == '0') {
+		else if(read_buffer[5] == '0') {
 			//set OFF
 			gpio_bank_pointer->dat &= ~(1 << pin);
 		}
 		pr_err("a13_gpio_value_write after write address:%p value:%#018x\n", &gpio_bank_pointer->dat, gpio_bank_pointer->dat);
-		return size;
+
+		vfree(read_buffer);
+	    return size;
 	}
 
+	vfree(read_buffer);
 	return -1;
 
 }
