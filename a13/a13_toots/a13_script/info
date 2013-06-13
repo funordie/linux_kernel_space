@@ -1,0 +1,15 @@
+Thanks to user "curso" here - http://www.slatedroi...__gopid__419727
+
+Here how to fix INVERTED CAMERA without reflashing the firmware.
+
+1. Mount boot partition
+adb shell
+mkdir /sdcard/nanda
+mount -t vfat /dev/block/nanda /sdcard/nanda
+
+2. Pull script.bin and script0.bin from /sdcard/nanda/
+adb pull /sdcard/nanda/script.bin
+adb pull /sdcard/nanda/script0.bin
+
+3. Decode, edit and Encode the script.bin and script0.bin as detailed by "curso" above. 
+

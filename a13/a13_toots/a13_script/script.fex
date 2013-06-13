@@ -270,7 +270,7 @@ dac0_src = 0
 hdmi_used = 0
 
 [csi0_para]
-csi_used = 1
+csi_used = 0
 csi_mode = 0
 csi_dev_qty = 1
 csi_stby_mode = 1
@@ -619,5 +619,5 @@ key_max = 6
 [gpio_para]
 gpio_used = 1
 gpio_num = 1
-gpio_pin_1 = port:PG09<1>
+gpio_pin_1 = port:PG09<1><default><default><default>
 
