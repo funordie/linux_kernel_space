@@ -17,6 +17,8 @@
 
 //#define PRINT_DEBUG_MESSAGES
 
+#define MAXSIZE 41
+
 #define A13_GPIO_BASE_ADDRESS 0x01C20800
 #define A13_GPIO_ADDRESS_SIZE 1024
 
@@ -110,6 +112,51 @@ static ssize_t a13_lcd_read(struct file *file, char __user *buf, size_t size, lo
 	return 0;
 }
 
+void SetGpioPinDirection(char cPort, unsigned short usPin, unsigned short usValue)
+{
+	unsigned long port;
+	struct sunxi_gpio * gpio_bank_pointer;
+
+	//set pin configurations
+	//input data format: A BB C
+	// A - port number [A - I]
+	// BB - pin number [00 - 31]
+	// C - direction [0-input 1-output]
+	//example: G 09 0 - G9 direction output
+
+	switch(cPort) {
+	case 'B':
+		//selected port - B
+		port = 1;
+		break;
+	case 'E':
+		//selected port - E
+		port = 4;
+		break;
+	case 'G':
+		//selected port - G
+		port = 6;
+		break;
+	case 'F':
+		//selected port - F
+		port = 7;
+		break;
+	default :
+		return;
+	}
+
+	gpio_bank_pointer = &sunxi_gpio->gpio_bank[port];
+
+	if(usValue) {
+		//set direction output
+		gpio_bank_pointer->cfg[usPin >> 3] |= (1 << ((usPin-((usPin>>3)*8))*4));
+	}
+	else {
+		//set direction input
+		gpio_bank_pointer->cfg[usPin >> 3] &= ~(1 << ((usPin-((usPin>>3)*8))*4));
+	}
+	PRINT_DEBUG("a13_gpio_config_write after write address:%p value:%#018x\n", &gpio_bank_pointer->cfg[usPin >> 3], gpio_bank_pointer->cfg[usPin >> 3]);
+}
 static void SetGpioPinValue(char cPort, unsigned short usPin, unsigned short usValue) {
 
 	unsigned long port;
@@ -205,8 +252,9 @@ void delay(unsigned short usMilisecDelay) {
 	for(i = 0; i < usMilisecDelay*100000; i++) {}
 }
 
+//	pin 01 - RS G 09
+//	pin 02 - E  B 03
 void LCD_SendCommand(unsigned short usValue) {
-	int i;
 
 	PRINT_DEBUG("LCD_SendCommand usValue:%d", usValue);
 
@@ -235,47 +283,58 @@ void LCD_SendCommand(unsigned short usValue) {
 	//delay
 	delay(1);
 }
+void printlcd(char * p) {
+
+	int nCount = 0;
+	LCD_WriteData(0x1);
+	LCD_SendCommand(0);
+
+	LCD_WriteData(0x2);
+	LCD_SendCommand(0);
+
+
+	while(*p) {
+
+		if(nCount == 20) {
+			//set DDRAM address to line1(address ox40)
+			LCD_WriteData(0xC0);
+			LCD_SendCommand(0);
+
+		}
+
+		PRINT_DEBUG("a13_lcd printlcd:%#X nCount:%d", *p, nCount);
+		//sed data pins
+		LCD_WriteData(*p);
+
+		//send data command
+		LCD_SendCommand(1);
+		p++;
+		nCount++;
+	}
+}
 static	ssize_t a13_lcd_write (struct file *file, const char __user *buf, size_t size, loff_t *offset)
 {
-	char ch[3];
-	unsigned int uValue;
 
-    char *write_buffer = vmalloc(size * sizeof(*write_buffer));
-    if (write_buffer == NULL)
-        return -ENOMEM;
-    if (copy_from_user(write_buffer, buf, size))
-    {
-        vfree(write_buffer);
-        return -EFAULT;
+	char d_buf[MAXSIZE];
+
+	PRINT_DEBUG("a13_lcd_write buf:[%#X %#X %#X %#X] size:%d offset:%lld"
+			, buf[0] , buf[1], buf[2], buf[3] , size , *offset);
+
+    if(size < MAXSIZE) {
+        copy_from_user(d_buf, buf, size);
+        d_buf[size-1] = 0;
+        printlcd(d_buf);
+        *offset += size;
+        return size;
+        }
+    else {
+        copy_from_user(d_buf, buf, MAXSIZE - 1);
+        d_buf[MAXSIZE - 1] = 0;
+        printlcd(d_buf);
+        *offset += MAXSIZE - 1;
+        //return MAXSIZE - 1;
+        return -ENOSPC;
     }
-    //process buffer
-    PRINT_DEBUG("a13_lcd_write buf:[%#X %#X %#X %#X] size:%d offset:%lld"
-			, write_buffer[0] , write_buffer[1], write_buffer[2], write_buffer[3] , size , *offset);
-
-	//input data format: DD M
-	// DD - data value - 1 byte
-	// M  - mode -
-	//    Data = 1
-	//    Instruction = 0
-
-	//read_buffer[0][1] - data
-	ch[0] = write_buffer[0];
-	ch[1] = write_buffer[1];
-	ch[2] = 0;
-	sscanf(ch, "%x", &uValue);
-	LCD_WriteData(uValue);
-
-	//read_buffer[2] - space
-
-	//read_buffer[3] - mode
-	ch[0] = write_buffer[3];
-	ch[1] = 0;
-	sscanf(ch, "%x", &uValue);
-	LCD_SendCommand(uValue);
-
-	vfree(write_buffer);
-	return -1;
-
 }
 
 static	int a13_lcd_release (struct inode *inode, struct file *file)
@@ -337,6 +396,53 @@ static void register_and_create_devices (void) {
 	error1:
 		unregister_chrdev_region(a13_lcd_dev_t, 1);
 }
+
+static void init_lcd_display(void) {
+	//	pin 01 - RS G 09
+	//	pin 02 - E  B 03
+	//	pin 03 - DB0 E 11
+	//	pin 04 - BD1 B 04
+	//	pin 05 - DB2 E 10
+	//	pin 06 - DB3 B 10
+	//	pin 07 - DB4 E 09
+	//	pin 08 - DB5 E 08
+	//	pin 09 - DB6 E 07
+	//	pin 10 - DB7 E 06
+
+	SetGpioPinDirection('G' , 9, 1);
+	SetGpioPinDirection('B' , 3, 1);
+
+	SetGpioPinDirection('E' ,11, 1);
+	SetGpioPinDirection('B' , 4, 1);
+	SetGpioPinDirection('E' ,10, 1);
+	SetGpioPinDirection('B' ,10, 1);
+	SetGpioPinDirection('E' , 9, 1);
+	SetGpioPinDirection('E' , 8, 1);
+	SetGpioPinDirection('E' , 7, 1);
+	SetGpioPinDirection('E' , 6, 1);
+
+	//send instructions
+	LCD_WriteData(0x38);
+	LCD_SendCommand(0);
+
+	LCD_WriteData(0x38);
+	LCD_SendCommand(0);
+
+	LCD_WriteData(0x38);
+	LCD_SendCommand(0);
+
+	LCD_WriteData(0x0C);
+	LCD_SendCommand(0);
+
+	LCD_WriteData(0x06);
+	LCD_SendCommand(0);
+
+	LCD_WriteData(0x1);
+	LCD_SendCommand(0);
+
+	LCD_WriteData(0x2);
+	LCD_SendCommand(0);
+}
 static int __init a13_lcd_driver_init(void) {
 
 	PRINT("a13_lcd_driver_init start");
@@ -359,6 +465,9 @@ static int __init a13_lcd_driver_init(void) {
 	else {
 		PRINT("a13_lcd I/O memory remap address:0x%p", sunxi_gpio);
 	}
+
+	//init display
+	init_lcd_display();
 
 	return 0;
 
