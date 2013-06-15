@@ -1,0 +1,11 @@
+#kernel build files
+*.ko.cmd
+*.mod.o.cmd
+*.o.cmd
+*.mod
+Module.symvers
+*.mod.c
+*.mod.o
+*.o
+modules.order
+
