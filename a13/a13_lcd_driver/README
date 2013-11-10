@@ -1,0 +1,2 @@
+//compile
+make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -C /home/ipaev/git_repos/linux-3.0-A13/linux-3.0  SUBDIRS=$PWD modules
