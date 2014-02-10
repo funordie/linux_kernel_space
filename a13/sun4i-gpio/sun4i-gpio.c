@@ -26,7 +26,7 @@
 
 #include <mach/sys_config.h>
 
-#undef DEBUG_SUN4I
+#define DEBUG_SUN4I
 
 #ifdef DEBUG_SUN4I
 #define sun4i_gpio_dbg(x...)	printk(x)
@@ -217,7 +217,7 @@ static int __init sun4i_gpio_init(void) {
 		}
 
 		gpio_i->gpio_handler = gpio_request_ex("gpio_para", pin);
-		sun4i_gpio_dbg("gpio handler: %d", gpio_i->gpio_handler);
+		sun4i_gpio_dbg("gpio handler: 0x%x\n", gpio_i->gpio_handler);
 
 		if(!gpio_i->gpio_handler) {
 			pr_err("%s can not get \"gpio_para\" \"%s\" gpio handler,\
